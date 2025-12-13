@@ -11,9 +11,13 @@ import {
 } from './shared.js'
 
 // Global Init
-const map = L.map('map', { worldCopyJump: true }).setView([47.76837, -122.06078], 10);
+const map = L.map('map', {
+  worldCopyJump: true,
+  zoomControl: false,
+}).setView(centerPos, 10);
 const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-  maxZoom: 19,
+  maxZoom: 16,
+  minZoom: 8,
   attribution: '© OpenStreetMap contributors | <a href="/howto" target="_blank">Contribute</a>'
 }).addTo(map);
 
@@ -27,6 +31,7 @@ let nodes = null; // Graph data from the last refresh
 let idToRepeaters = null; // Index of id -> [repeater]
 let hashToCoverage = null; // Index of geohash -> coverage
 let edgeList = null; // List of connected repeater and coverage
+let topRepeaters = null; // List of [repeater, count] with most hits
 
 // Map layers
 const coverageLayer = L.layerGroup().addTo(map);
@@ -35,7 +40,7 @@ const sampleLayer = L.layerGroup().addTo(map);
 const repeaterLayer = L.layerGroup().addTo(map);
 
 // Map controls
-const mapControl = L.control({ position: 'topright' });
+const mapControl = L.control({ position: 'bottomright' });
 mapControl.onAdd = m => {
   const div = L.DomUtil.create('div', 'mesh-control leaflet-control');
 
@@ -95,8 +100,37 @@ mapControl.onAdd = m => {
 
   return div;
 };
-
 mapControl.addTo(map);
+
+const statsControl = L.control({position: 'bottomleft'});
+statsControl.onAdd = m => {
+  const div = L.DomUtil.create('div', 'mesh-control leaflet-control');
+
+  div.innerHTML = `
+    <div class="mesh-control-row">
+      <div id="topRepeatersSection" class="interactive">Top Repeaters</div>
+      <div id="topRepeatersList" class="hidden">
+      </div>
+    </div>
+  `;
+
+  div.querySelector("#topRepeatersSection")
+    .addEventListener("click", () => {
+      const topRepeatersList = document.getElementById("topRepeatersList");
+      if (topRepeatersList.classList.contains("hidden"))
+        topRepeatersList.classList.remove("hidden");
+      else
+        topRepeatersList.classList.add("hidden");
+    });
+
+  // Don’t let clicks on the control bubble up and pan/zoom the map.
+  L.DomEvent.disableClickPropagation(div);
+  L.DomEvent.disableScrollPropagation(div);
+  renderTopRepeaters();
+
+  return div;
+};
+statsControl.addTo(map);
 
 // Max radius circle.
 L.circle(centerPos, {
@@ -335,6 +369,16 @@ function renderNodes(nodes) {
   });
 }
 
+function renderTopRepeaters() {
+  const topList = document.getElementById('topRepeatersList');
+  if (topList && topRepeaters) {
+    topList.innerHTML = '';
+    topRepeaters.forEach(([id, count]) => {
+      topList.innerHTML += `<div class="top-rpt-row"><div>${escapeHtml(id)}</div><div>${count}</div></div>`;
+    });
+  }
+}
+
 function buildIndexes(nodes) {
   hashToCoverage = new Map();
   idToRepeaters = new Map();
@@ -397,6 +441,11 @@ function buildIndexes(nodes) {
       edgeList.push({ repeater: bestRepeater, coverage: coverage });
     });
   });
+
+  // Build top repeaters list (top 15).
+  const repeaterGroups = Object.groupBy(edgeList, e => `[${e.repeater.id}] ${e.repeater.name}`);
+  const sortedGroups = Object.entries(repeaterGroups).toSorted(([,a], [,b]) => b.length - a.length);
+  topRepeaters = sortedGroups.slice(0, 15).map(([id, tiles]) => [id, tiles.length]);
 }
 
 export async function refreshCoverage() {
@@ -409,4 +458,5 @@ export async function refreshCoverage() {
   nodes = await resp.json();
   buildIndexes(nodes);
   renderNodes(nodes);
+  renderTopRepeaters();
 }

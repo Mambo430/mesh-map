@@ -7,7 +7,12 @@ body,
 
 .hidden {
   opacity: 0;
+  display: none;
   pointer-events: none;
+}
+
+.interactive {
+  cursor: pointer;
 }
 
 .highlighted {
@@ -61,7 +66,7 @@ body,
 }
 
 .mesh-control {
-  background: #f5f5f5;
+  background: #f0f0f0;
   padding: 6px 10px;
   border-radius: 4px;
   box-shadow: 0 0 4px rgba(0, 0, 0, 0.3);
@@ -130,4 +135,30 @@ body,
 
 .mesh-control-row button:hover {
   background: #e8e8e8;
+}
+
+.mesh-control .top-rpt-row {
+  width: 100%;
+  font-size: x-small;
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  column-gap: 0.5em;
+}
+
+.mesh-control .top-rpt-row:nth-child(odd) {
+  background-color: #e5e5e5;
+}
+
+.mesh-control .top-rpt-row div:first-child {
+  flex: 1 1 auto;
+  white-space: nowrap;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis; 
+}
+
+.mesh-control .top-rpt-row div:last-child {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
