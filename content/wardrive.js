@@ -1,10 +1,13 @@
 import { WebBleConnection, Constants } from "/content/mc/index.js";
 import {
+  ageInDays,
   centerPos,
   coverageKey,
   geo,
   isValidLocation,
   maxDistanceMiles,
+  posFromHash,
+  sampleKey
 } from "/content/shared.js";
 
 // --- DOM helpers ---
@@ -125,7 +128,7 @@ const state = {
   autoTimerId: null,
   wakeLock: null,
   ignoredId: null, // Allows a repeater to be ignored.
-  pings: [], // TODO: store in local storage.
+  pings: [], // { hash: 8-char, heard: Bool }
   tiles: new Map(),
   following: true,
   locationTimer: null,
@@ -197,11 +200,30 @@ function redrawCoverage() {
 }
 
 // --- Ping markers ---
+async function getSample(sampleId) {
+  try {
+    let url = `/get-samples?p=${sampleId}`;
+    const resp = await fetch(url);
+    const samples = (await resp.json()) ?? [];
+    log(`Got ${samples.length} samples from service.`);
+    return samples[0]; // May return undefined.
+  } catch (e) {
+    console.error("Getting sample failed", e);
+    setStatus("Get sample failed", "text-red-300");
+  }
+}
+
 function loadPingHistory() {
   try {
     state.pings = [];
     const data = localStorage.getItem(PING_HISTORY_ID_KEY);
     state.pings = JSON.parse(data) ?? [];
+
+    // Upgrade ping data if needed.
+    if (state.pings.length > 0 && !state.pings[0].hasOwnProperty("hash")) {
+      state.pings = state.pings.map(x => ({ hash: sampleKey(x[0], x[1]) }));
+      savePingHistory();
+    }
   } catch (e) {
     console.warn("Failed to load ping history", e);
   }
@@ -215,19 +237,27 @@ function savePingHistory() {
   }
 }
 
-function addPingHistory(pos) {
-  addPingMarker(pos);
-  state.pings.push(pos);
+function addPingHistory(ping) {
+  addPingMarker(ping);
+  state.pings.push(ping);
   savePingHistory();
 }
 
-function addPingMarker(pos) {
+function addPingMarker(ping) {
+  const color =
+    ping.heard === true
+      ? '#398821' // Hit - Green
+      : ping.heard === false
+        ? '#E04748' // Miss - Red
+        : "#B92FAE"; // Unknown - Purple
+
+  const pos = posFromHash(ping.hash);
   const pingMarker = L.circleMarker(pos, {
     radius: 3,
     weight: 1,
     color: "white",
-    fillColor: "#B92FAE",
-    fillOpacity: .8,
+    fillColor: color,
+    fillOpacity: .75,
     pane: "markerPane"
   });
   pingLayer.addLayer(pingMarker);
@@ -451,6 +481,7 @@ async function sendPing({ auto = false } = {}) {
   }
 
   const [lat, lon] = pos;
+  const sampleId = sampleKey(lat, lon);
   const tileId = coverageKey(lat, lon);
 
   // A Ping is needed in the current tile if the tile
@@ -462,7 +493,7 @@ async function sendPing({ auto = false } = {}) {
     return;
   }
 
-  // TODO: would be nice to just send the geohash.
+  // TODO: just send the sample geohash.
   let text = `${lat.toFixed(4)} ${lon.toFixed(4)}`;
   if (state.ignoredId !== null) text += ` ${state.ignoredId}`;
 
@@ -489,18 +520,25 @@ async function sendPing({ auto = false } = {}) {
     setStatus("Web send failed", "text-red-300");
   }
 
-  // Update the tile locally immediately.
-  // Setting "age" to the cutoff so it stops getting pinged,
-  // but will be overwritten with the right value.
+  // Update the tile state immediately.
+  // Setting "age" to the cutoff so it stops getting pinged.
   mergeCoverage(tileId, { h: 0, a: refreshTileAge });
-  addCoverageBox(tileId);
-  addPingHistory(pos);
 
-  // Queue a tile update from the service.
-  // The mesh+MQTT+service is pretty slow so give it a few seconds to process.
+  // Queue fetching the sample from the service to update the UI.
+  // The mesh+MQTT+service can be pretty slow so give it a few seconds to process.
   setTimeout(async () => {
-    await refreshCoverage(tileId);
+    const sample = await getSample(sampleId);
+    const ping = { hash: sampleId };
+
+    if (sample) {
+      ping.heard = sample.path?.length > 0;
+      const age = ageInDays(sample.time);
+      const h = ping.heard ? 1 : 0;
+      mergeCoverage(tileId, { h: h, a: age });
+    }
+
     addCoverageBox(tileId);
+    addPingHistory(ping);
   }, 3000);
 }
 
