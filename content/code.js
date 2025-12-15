@@ -22,6 +22,7 @@ const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
 }).addTo(map);
 
 // Control state
+let coloringMode = 'simple';
 let repeaterRenderMode = 'hit';
 let repeaterSearch = '';
 let showSamples = false;
@@ -40,37 +41,70 @@ const sampleLayer = L.layerGroup().addTo(map);
 const repeaterLayer = L.layerGroup().addTo(map);
 
 // Map controls
-const mapControl = L.control({ position: 'bottomright' });
+const mapControl = L.control({ position: 'topleft' });
 mapControl.onAdd = m => {
   const div = L.DomUtil.create('div', 'mesh-control leaflet-control');
 
   div.innerHTML = `
-    <div class="mesh-control-row">
-      <label>
-        Repeaters:
-        <select id="repeater-filter-select">
-          <option value="all">All</option>
-          <option value="hit" selected="true">Hit</option>
-          <option value="none">None</option>
-        </select>
-      </label>
-    </div>
-    <div class="mesh-control-row">
-      <label>
-        Find Id:
-        <input type="text" id="repeater-search" />
-      </label>
-    </div>
-    <div class="mesh-control-row">
-      <label>
-        Show Samples:
-        <input type="checkbox" id="show-samples" />
-      </label>
-    </div>
-    <div class="mesh-control-row">
-      <button type="button" id="refresh-map-button">Refresh map</button>
+    <div id="meshMapControlsSection" class="mesh-control-row mesh-control-title interactive">Map Controls</div>
+    <div id="meshMapControls" class="mesh-control-row">
+      <div class="mesh-control-row">
+        <label>
+          Coloring:
+          <select id="coverage-colormode-select">
+            <option value="simple" title="Green for heard, Red for lost" selected>Simple</option>
+            <option value="effective" title="Darker is confidence of message success or fail">Effective Coverage</option>
+            <option value="heardPct" title="Darker is higher success rate">Heard %</option>
+            <option value="lastHeard" title="Darker is more recently heard">Last Heard</option>
+            <option value="lastUpdated" title="Darker is more recently pinged">Last Updated</option>
+            <option value="pastDay" title="Tiles updated in the past 1 day are dark">Past Day</option>
+            <option value="repeaterCount" title="Darker indicates more repeaters">Repeater Count</option>
+            <option value="sampleCount" title="Darker indicates more samples">Sample Count</option>
+          </select>
+        </label>
+      </div>
+      <div class="mesh-control-row">
+        <label>
+          Repeaters:
+          <select id="repeater-filter-select">
+            <option value="all" title="Show all repeaters">All</option>
+            <option value="hit" title="Show repeaters hit by pings" selected>Hit</option>
+            <option value="none" title="Hide all repeaters">None</option>
+          </select>
+        </label>
+      </div>
+      <div class="mesh-control-row">
+        <label>
+          Find Id:
+          <input type="text" id="repeater-search" />
+        </label>
+      </div>
+      <div class="mesh-control-row">
+        <label>
+          Show Samples:
+          <input type="checkbox" id="show-samples" />
+        </label>
+      </div>
+      <div class="mesh-control-row">
+        <button type="button" id="refresh-map-button">Refresh map</button>
+      </div>
     </div>
   `;
+
+  div.querySelector("#meshMapControlsSection")
+  .addEventListener("click", () => {
+    const topRepeatersList = document.getElementById("meshMapControls");
+    if (topRepeatersList.classList.contains("hidden"))
+      topRepeatersList.classList.remove("hidden");
+    else
+      topRepeatersList.classList.add("hidden");
+  });
+
+  div.querySelector("#coverage-colormode-select")
+    .addEventListener("change", (e) => {
+      coloringMode = e.target.value;
+      renderNodes(nodes);
+    });
 
   div.querySelector("#repeater-filter-select")
     .addEventListener("change", (e) => {
@@ -102,16 +136,13 @@ mapControl.onAdd = m => {
 };
 mapControl.addTo(map);
 
-const statsControl = L.control({position: 'bottomleft'});
+const statsControl = L.control({position: 'topright'});
 statsControl.onAdd = m => {
   const div = L.DomUtil.create('div', 'mesh-control leaflet-control');
 
   div.innerHTML = `
-    <div class="mesh-control-row">
-      <div id="topRepeatersSection" class="interactive">Top Repeaters</div>
-      <div id="topRepeatersList" class="hidden">
-      </div>
-    </div>
+    <div id="topRepeatersSection" class="mesh-control-row mesh-control-title interactive">Top Repeaters</div>
+    <div id="topRepeatersList" class="mesh-control-row hidden"></div>
   `;
 
   div.querySelector("#topRepeatersSection")
@@ -147,23 +178,83 @@ function escapeHtml(s) {
     .replaceAll('>', '&gt;');
 }
 
+function getCoverageStyle(coverage) {
+  const rcvColor = '#398821';
+  const missColor = '#E04748';
+  // Default to "simple" style.
+  const style = {
+    color: coverage.rcv > 0 ?  rcvColor : missColor,
+    fillOpacity: 0.6,
+    opacity: 0.8,
+    weight: 1
+  };
+
+  switch (coloringMode) {
+    case 'effective': {
+      // Hits get a little boost.
+      const combined = coverage.rcv * 0.25 - coverage.lost * 0.125;
+      style.color = combined > 0 ?  rcvColor : missColor;
+      style.fillOpacity = Math.min(0.9, Math.abs(combined));
+      break;
+    }
+
+    case 'heardPct': {
+      const sampleCount = coverage.rcv + coverage.lost;
+      const heardPercent = coverage.rcv / sampleCount;
+      style.fillOpacity = Math.min(0.9, Math.max(0.1, heardPercent));
+      break;
+    }
+
+    case 'lastHeard': {
+      const age = ageInDays(fromTruncatedTime(coverage.lht));
+      style.fillOpacity = Math.max(0.1, (-0.075 * age + 0.85));
+      break;
+    }
+
+    case 'lastUpdated': {
+      const age = ageInDays(fromTruncatedTime(coverage.ut));
+      style.fillOpacity = Math.max(0.1, (-0.02 * age + 0.85));
+      break;
+    }
+
+    case 'pastDay': {
+      const age = ageInDays(fromTruncatedTime(coverage.ut));
+      style.fillOpacity = age <= 1 ? 0.75 : 0.1;
+      break;
+    }
+
+    case 'repeaterCount': {
+      if (coverage.rptr?.length)
+        style.fillOpacity = Math.min(0.9, sigmoid((coverage.rptr?.length ?? 0), 0.75, 1));
+      else
+        style.fillOpacity = 0;
+      break;
+    }
+
+    case 'sampleCount': {
+      const sampleCount = coverage.rcv + coverage.lost;
+      style.fillOpacity = Math.min(0.9, sigmoid(sampleCount, 0.5, 3));
+    }
+
+    default: break;
+  }
+
+  return style;
+}
+
 function coverageMarker(coverage) {
   const [minLat, minLon, maxLat, maxLon] = geo.decode_bbox(coverage.id);
-  const color = coverage.rcv > 0 ? '#398821' : '#E04748';
   const totalSamples = coverage.rcv + coverage.lost;
   const heardRatio = coverage.rcv / totalSamples;
-  const date = new Date(fromTruncatedTime(coverage.time));
-  const opacity = 0.75 * sigmoid(totalSamples, 1.2, 2) * (heardRatio > 0 ? heardRatio : 1);
-  const style = {
-    color: color,
-    weight: 1,
-    fillOpacity: Math.max(opacity, 0.1),
-  };
+  const updateDate = new Date(fromTruncatedTime(coverage.ut));
+  const lastHeardDate = new Date(fromTruncatedTime(coverage.lht));
+  const style = getCoverageStyle(coverage);
   const rect = L.rectangle([[minLat, minLon], [maxLat, maxLon]], style);
   const details = `
     <strong>${coverage.id}</strong><br/>
-    Heard: ${coverage.rcv} Lost: ${coverage.lost} (${(100 * heardRatio).toFixed(0)}%)<br/>
-    Updated: ${date.toLocaleString()}
+    Received: ${coverage.rcv} Lost: ${coverage.lost} (${(100 * heardRatio).toFixed(0)}%)<br/>
+    ${coverage.rcv ? `Last Received: ${lastHeardDate.toLocaleString()}<br/>` : ''}
+    Updated: ${updateDate.toLocaleString()}
     ${coverage.rptr.size === 0 ? '' : '<br/>Repeaters: ' + coverage.rptr.join(',')}`;
 
   rect.coverage = coverage;
@@ -404,7 +495,8 @@ function buildIndexes(nodes) {
         pos: [lat, lon],
         rcv: 0,
         lost: 0,
-        time: 0,
+        ut: 0,
+        lht: 0,
         rptr: [],
       };
       hashToCoverage.set(key, coverage);
@@ -414,7 +506,8 @@ function buildIndexes(nodes) {
     const heard = path.length > 0;
     coverage.rcv += heard ? 1 : 0;
     coverage.lost += !heard ? 1 : 0;
-    coverage.time = Math.max(coverage.time, s.time);
+    coverage.ut = Math.max(coverage.ut, s.time);
+    coverage.lht = Math.max(coverage.lht, heard ? s.time : 0);
     path.forEach(p => {
       const lp = p.toLowerCase();
       if (!coverage.rptr.includes(lp))

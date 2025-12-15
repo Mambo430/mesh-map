@@ -79,6 +79,10 @@ body,
   align-items: center;
 }
 
+.mesh-control-row.mesh-control-title {
+  font-weight: 700;
+}
+
 .mesh-control-row + .mesh-control-row {
   margin-top: 8px;
 }
