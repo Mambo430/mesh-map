@@ -254,7 +254,7 @@ function addPingMarker(ping) {
 
   const pos = posFromHash(ping.hash);
   const pingMarker = L.circleMarker(pos, {
-    radius: 5,
+    radius: 4,
     weight: 0.75,
     color: "white",
     fillColor: color,
