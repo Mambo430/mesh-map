@@ -548,8 +548,7 @@ function buildIndexes(nodes) {
 
   // Index coverage items.
   nodes.coverage.forEach(c => {
-    const { latitude: lat, longitude: lon } = geo.decode(c.id);
-    c.pos = [lat, lon];
+    c.pos = posFromHash(c.id);
     if (c.rptr === undefined) c.rptr = [];
     hashToCoverage.set(c.id, c);
   });
@@ -560,10 +559,9 @@ function buildIndexes(nodes) {
     const key = s.id.substring(0, 6);
     let coverage = hashToCoverage.get(key);
     if (!coverage) {
-      const { latitude: lat, longitude: lon } = geo.decode(key);
       coverage = {
         id: key,
-        pos: [lat, lon],
+        pos: posFromHash(key),
         obs: 0,
         hrd: 0,
         lost: 0,
@@ -598,7 +596,8 @@ function buildIndexes(nodes) {
   // Index repeaters.
   nodes.repeaters.forEach(r => {
     r.hitBy = [];
-    r.pos = [r.lat, r.lon];
+    r.pos = posFromHash(r.hash);
+    [r.lat, r.lon] = r.pos;
     pushMap(idToRepeaters, r.id, r);
   });
 
