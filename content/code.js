@@ -15,7 +15,7 @@ import {
 const map = L.map('map', {
   worldCopyJump: true,
   zoomControl: false,
-}).setView(centerPos, 10);
+}).setView(centerPos, 11);
 const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
   maxZoom: 16,
   minZoom: 8,
@@ -163,8 +163,8 @@ mapControl.onAdd = m => {
 };
 mapControl.addTo(map);
 
-const statsControl = L.control({ position: 'topright' });
-statsControl.onAdd = m => {
+const repeaterStatsControl = L.control({ position: 'topright' });
+repeaterStatsControl.onAdd = m => {
   const div = L.DomUtil.create('div', 'mesh-control leaflet-control');
 
   div.innerHTML = `
@@ -188,7 +188,53 @@ statsControl.onAdd = m => {
 
   return div;
 };
-statsControl.addTo(map);
+repeaterStatsControl.addTo(map);
+
+const senderStatsControl = L.control({ position: 'topright' });
+senderStatsControl.onAdd = m => {
+  const div = L.DomUtil.create('div', 'mesh-control leaflet-control');
+
+  div.innerHTML = `
+    <div id="topSendersSection" class="mesh-control-row mesh-control-title interactive">
+      Top Contributors
+    </div>
+    <div id="topSendersList" class="mesh-control-row hidden max-height-20"></div>
+  `;
+
+  div.querySelector("#topSendersSection")
+    .addEventListener("click", async () => {
+      const topSendersList = document.getElementById("topSendersList");
+      if (topSendersList.classList.contains("hidden")) {
+        topSendersList.classList.remove("hidden");
+        await refreshTopSenders(topSendersList);
+      } else {
+        topSendersList.classList.add("hidden");
+      }
+    });
+
+  // Don’t let clicks on the control bubble up and pan/zoom the map.
+  L.DomEvent.disableClickPropagation(div);
+  L.DomEvent.disableScrollPropagation(div);
+
+  // Helper to refresh the stats.
+  async function refreshTopSenders(topList) {
+    const endpoint = "/get-senders";
+    const resp = await fetch(endpoint, { headers: { 'Accept': 'application/json' } });
+
+    if (resp.ok) {
+      const data = await resp.json();
+      if (topList && data) {
+        topList.innerHTML = '';
+        data.forEach(d => {
+          topList.innerHTML += `<div class="top-row"><div>${escapeHtml(d.name)}</div><div>${d.tiles}</div></div>`;
+        });
+      }
+    }
+  }
+
+  return div;
+};
+senderStatsControl.addTo(map);
 
 // Max radius circle.
 L.circle(centerPos, {
@@ -604,7 +650,7 @@ function renderTopRepeaters() {
   if (topList && topRepeaters) {
     topList.innerHTML = '';
     topRepeaters.forEach(([id, count]) => {
-      topList.innerHTML += `<div class="top-rpt-row"><div>${escapeHtml(id)}</div><div>${count}</div></div>`;
+      topList.innerHTML += `<div class="top-row"><div>${escapeHtml(id)}</div><div>${count}</div></div>`;
     });
   }
 }
