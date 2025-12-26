@@ -376,6 +376,7 @@ function getCoverageStyle(coverage) {
 
     case 'pastDay': {
       const age = ageInDays(fromTruncatedTime(coverage.ut));
+      style.opacity = age <= 1 ? 0.75 : 0.1;
       style.fillOpacity = age <= 1 ? 0.75 : 0.1;
       break;
     }
