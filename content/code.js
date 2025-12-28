@@ -86,10 +86,7 @@ mapControl.onAdd = m => {
         </label>
       </div>
       <div class="mesh-control-row">
-        <label>
-          Show Samples:
-          <input type="checkbox" id="show-samples" />
-        </label>
+
       </div>
       <div class="mesh-control-row">
         <button type="button" id="refresh-map-button">Refresh map</button>
