@@ -125,6 +125,25 @@ map.on("mousedown touchstart wheel dragstart", () => {
   updateFollowButton();
 });
 
+// --- Versioning ---
+const pageLoaded = Date.now();
+
+async function ensureLatestVersion() {
+  try {
+    const resp = await fetch("/version", { cache: "no-store" });
+    const { latest } = await resp.json();
+
+    // Was the page loaded after the latest version?
+    if (latest < pageLoaded)
+      return;
+
+    alert("A new version is available. Reloading...");
+    location.reload();
+  } catch (e) {
+    console.error("Failed to fetch version info", e);
+  }
+}
+
 // --- Logging ---
 function setStatus(text, color = null) {
   statusEl.textContent = text;
@@ -740,6 +759,8 @@ async function handleConnect() {
   if (state.connection) {
     return;
   }
+
+  await ensureLatestVersion();
 
   if (!("bluetooth" in navigator)) {
     alert("Web Bluetooth not supported in this browser.");

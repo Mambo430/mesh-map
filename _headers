@@ -1,3 +1,6 @@
+/version
+  Cache-Control: no-store, must-revalidate
+
 /wardrive
   Cache-Control: no-store, must-revalidate
 
