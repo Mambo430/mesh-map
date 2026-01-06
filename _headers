@@ -8,8 +8,4 @@
   Cache-Control: no-store, must-revalidate
 
 /content/wardrive.js
-<<<<<<< HEAD
   Cache-Control: no-store, must-revalidate
-=======
-  Cache-Control: no-store, must-revalidate
->>>>>>> upstream/main
