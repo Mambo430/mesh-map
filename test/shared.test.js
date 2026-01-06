@@ -127,4 +127,8 @@ test('isValidRssi returns true for valid values', () => {
 test('isValidRssi returns true for invalid values', () => {
   expect(util.isValidRssi(-30)).toBe(false);
   expect(util.isValidRssi(0)).toBe(false);
+<<<<<<< HEAD
 });
+=======
+});
+>>>>>>> upstream/main

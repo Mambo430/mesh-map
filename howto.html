@@ -65,8 +65,22 @@
     automate the process. To be considered reachable, your message repeats have to
     be observed by one of the following MQTT observers.
     <ul class="pl-4 text-sm list-disc">
+<<<<<<< HEAD
       <li>KQ4WAA [6a]</li>
       <li>TF-Room [5f]</li>
+=======
+      <li>Discovery MQTT [33]</li>
+      <li>N7JMV-NEW-RP [53]</li>
+      <li>N7JMV/WA7LAW-EVERETT-RP [e0]</li>
+      <li>Powerline Trail [75]</li>
+      <li>PugetMesh Haystack [86]</li>
+      <li>Red Repeater [34]</li>
+      <li>W7ITL-PTDefiance-IKOKA [e8]</li>
+      <li>WW7STR/PugetMesh Cougar [7e]</li>
+      <li>Woodward Repeater [0d]</li>
+      <li>Yaletown Repeater [56]</li>
+      <li>YVR//Seafair [bf]</li>
+>>>>>>> upstream/main
     </ul>
   </div>
   <div class="mb-2 pl-4 text-base">
@@ -93,11 +107,21 @@
   <div class="mb-2 pl-4 text-base">
     It mostly "just works", but there are few things to know when using the app.
     <ul class="mb-2 pl-4 text-sm list-disc">
+      <li class="text-amber-300"><b>If you're using a mobile repeater (car-peater), use the "ignore id" function to exclude it from the path.
+        Otherwise coverage data will be inaccurate.</b>
+        <ul class="pl-4 text-sm list-disc">
+          <li>Radio statistics (SNR/RSSI) cannot be collected if you're using a mobile repeater.</li>
+        </ul>
+      </li>
       <li>You must allow access to Bluetooth and Location in your browser.</li>
       <li>Your companion radio must add the #wardrive channel. The app will help with that.</li>
       <li>It does not work in Safari or most vendor-modded Android browsers.
         <ul class="pl-4 text-sm list-disc">
+<<<<<<< HEAD
           <li>On MacOS, use Edge or Chrome.</li>
+=======
+          <li>On Macos use Edge or Chrome.</li>
+>>>>>>> upstream/main
           <li>On iOS, use the <a class="underline text-sky-300" target="_blank"
               href="https://apps.apple.com/us/app/bluefy-web-ble-browser/id1492822055">Bluefy app</a>
           </li>
@@ -118,9 +142,15 @@
       <li>Auto mode checks every 10 seconds if you're in a coverage tile that needs an update and only sends a ping if
         needed (hasn't already been pinged in the past day).</li>
       <li>Don't spam the mesh or the service. The mesh is a shared resource -- be judicious.</li>
-      <li><b>If you're using a mobile repeater (car-peater), use the "ignore id" function to exclude it from the path.
-          Otherwise coverage data will be inaccurate.</b></li>
     </ul>
+    <h3 class="mb-2 pl-4 text-lg text-slate-100">Passive Mode</h3>
+    <div class="mb-2 pl-4 text-base">
+      As long as your radio is connected, even when not actively pinging, the app will submit
+      passive samples for tiles using the RxLog. When your radio receives a group message the
+      app collects parts of the path and radio statistics and sends that to the service to build
+      out the passive map view. <b>This is disabled if you have an "ignored id" set. Mobile repeaters
+      mess up the data collection because SNR and RSSI values will be completely incorrect for the tile.</b>
+    </div>
   </div>
 
   <h2 class="mb-2 text-xl text-slate-100">Host an instance for your region?</h2>
@@ -141,6 +171,7 @@
     The only thing the service stores is the location you send to #wardrive and the id of the 1st hop repeater.
     The web app sends your location to #wardrive and to the service. That's it. Logging on the web app is stored
     locally. You will be sending your companion radio's name with your location to #wardrive which is a public channel.
+    <b>Optionally</b>, if you want to participate in the leaderboard, you can choose to send your radio name with pings.
   </div>
 
 </body>

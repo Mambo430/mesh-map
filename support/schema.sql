@@ -63,4 +63,8 @@ CREATE TABLE IF NOT EXISTS rx_samples (
   samples TEXT NOT NULL DEFAULT '[]'
     CHECK (json_valid(samples) AND json_type(samples)='array')
 );
+<<<<<<< HEAD
 CREATE INDEX IF NOT EXISTS idx_rx_samples_time ON rx_samples(time);
+=======
+CREATE INDEX IF NOT EXISTS idx_rx_samples_time ON rx_samples(time);
+>>>>>>> upstream/main
