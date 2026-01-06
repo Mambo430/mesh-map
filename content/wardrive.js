@@ -11,11 +11,13 @@ import {
   centerPos,
   fadeColor,
   geo,
+  geohash6,
   geohash8,
+  getPathEntry,
   isValidLocation,
+  isValidRssi,
   maxDistanceMiles,
-  posFromHash,
-  toHex
+  posFromHash
 } from "/content/shared.js";
 
 // --- DOM helpers ---
@@ -29,6 +31,7 @@ const connectBtn = $("connectBtn");
 const sendPingBtn = $("sendPingBtn");
 const autoToggleBtn = $("autoToggleBtn");
 const ignoredRepeaterBtn = $("ignoredRepeaterBtn");
+const rxLogStatusEl = $("rxLogStatus");
 
 // Channel key is derived from the channel hashtag.
 // Channel hash is derived from the channel key.
@@ -122,6 +125,25 @@ map.on("mousedown touchstart wheel dragstart", () => {
   updateFollowButton();
 });
 
+// --- Versioning ---
+const pageLoaded = Date.now();
+
+async function ensureLatestVersion() {
+  try {
+    const resp = await fetch("/version", { cache: "no-store" });
+    const { latest } = await resp.json();
+
+    // Was the page loaded after the latest version?
+    if (latest < pageLoaded)
+      return;
+
+    alert("A new version is available. Reloading...");
+    location.reload();
+  } catch (e) {
+    console.error("Failed to fetch version info", e);
+  }
+}
+
 // --- Logging ---
 function setStatus(text, color = null) {
   statusEl.textContent = text;
@@ -148,6 +170,7 @@ const state = {
   ignoredId: null, // Allows a repeater to be ignored.
   sendRadioName: false,
   pings: [],
+  rxHistory: [],
   tiles: new Map(),
   following: true,
   locationTimer: null,
@@ -247,12 +270,6 @@ function loadPingHistory() {
     state.pings = [];
     const data = localStorage.getItem(PING_HISTORY_ID_KEY);
     state.pings = JSON.parse(data || '[]');
-
-    // Upgrade ping data if needed.
-    if (state.pings.length > 0 && !state.pings[0].hasOwnProperty("hash")) {
-      state.pings = state.pings.map(x => ({ hash: geohash8(x[0], x[1]) }));
-      savePingHistory();
-    }
   } catch (e) {
     console.warn("Failed to load ping history", e);
   }
@@ -267,6 +284,11 @@ function savePingHistory() {
 }
 
 function addPingHistory(ping) {
+  // Don't add pings for the exact same location.
+  const existing = state.pings.find(p => p.hash == ping.hash);
+  if (existing)
+    return;
+
   addPingMarker(ping);
   state.pings.push(ping);
   savePingHistory();
@@ -274,6 +296,8 @@ function addPingHistory(ping) {
 
 function addPingMarker(ping) {
   function getPingColor(p) {
+    if (p.rxLog)
+      return '#A126C3' // RxLog - Violet
     if (p.observed)
       return '#398821' // Observed - Green
     if (p.heard)
@@ -284,7 +308,7 @@ function addPingMarker(ping) {
 
   const pos = posFromHash(ping.hash);
   const pingMarker = L.circleMarker(pos, {
-    radius: 4,
+    radius: ping.rxLog ? 3 : 4, // Smaller RxLog pings.
     weight: 0.75,
     color: "white",
     fillColor: getPingColor(ping),
@@ -361,7 +385,7 @@ function promptIgnoredId() {
     return;
   }
 
-  state.ignoredId = id ? id : null;
+  state.ignoredId = id ? id.toLowerCase() : null;
   saveSettings();
   refreshSettingsUI();
 }
@@ -480,15 +504,9 @@ async function createWardriveChannel() {
     throw new Error("No free channel slots available");
   }
 
-  // Derived secret for #wardrive 4076c315c1ef385fa93f066027320fe5
-  const wardriveKey = new Uint8Array([
-    0x40, 0x76, 0xC3, 0x15, 0xC1, 0xEF, 0x38, 0x5F,
-    0xA9, 0x3F, 0x06, 0x60, 0x27, 0x32, 0x0F, 0xE5
-  ]);
-
   // Create and set the connection.
-  const channel = { channelIdx: idx, name: wardriveChannelName, wardriveKey };
-  await state.connection.setChannel(idx, wardriveChannelName, wardriveKey);
+  const channel = { channelIdx: idx, name: wardriveChannelName, wardriveChannelKey };
+  await state.connection.setChannel(idx, wardriveChannelName, wardriveChannelKey);
   return channel;
 }
 
@@ -615,8 +633,7 @@ async function sendPing({ auto = false } = {}) {
     const data = { lat, lon };
     if (repeat) {
       data.path = [repeat.repeater];
-      if (!repeat.hitMobileRepeater) {
-        // Don't include signal info when using a mobile repeater.
+      if (repeat.shouldSendRxStats) {
         data.snr = repeat.lastSnr;
         data.rssi = repeat.lastRssi;
       }
@@ -637,18 +654,18 @@ async function sendPing({ auto = false } = {}) {
   }
 
   // Update the tile state immediately.
-  // Setting "age" to the cutoff so it stops getting pinged.
+  // Set "age" to the cutoff so it stops getting pinged.
   const heard = repeat?.repeater !== undefined;
   mergeCoverage(tileId, { o: 0, h: heard ? 1 : 0, a: refreshTileAge });
 
-  // Queue fetching the sample from the service to update the UI.
+  // Enqueue fetching the sample from the service to update the UI.
   // The mesh+MQTT+service can be pretty slow so give it a few seconds to process.
   setTimeout(async () => {
     const sample = await getSample(sampleId);
     const ping = { hash: sampleId };
 
     if (sample) {
-      const repeaters = JSON.parse(sample.repeaters || '[]');
+      const repeaters = sample.repeaters;
       ping.observed = sample.observed;
       ping.heard = repeaters.length > 0;
       mergeCoverage(tileId, {
@@ -713,7 +730,6 @@ function stopAutoPing() {
   }
   state.running = false;
   updateAutoButton();
-  releaseWakeLock();
 }
 
 async function startAutoPing() {
@@ -736,8 +752,6 @@ async function startAutoPing() {
   state.autoTimerId = setInterval(() => {
     sendPing({ auto: true }).catch(console.error);
   }, intervalMs);
-
-  await acquireWakeLock();
 }
 
 // --- Connection handling ---
@@ -745,6 +759,8 @@ async function handleConnect() {
   if (state.connection) {
     return;
   }
+
+  await ensureLatestVersion();
 
   if (!("bluetooth" in navigator)) {
     alert("Web Bluetooth not supported in this browser.");
@@ -806,6 +822,7 @@ async function onConnected() {
 
     // Don't enable ping buttons until after ensure channel.
     updateControlsForConnection(true);
+    await acquireWakeLock();
   } catch (e) {
     console.error("Error during initial sync", e);
     setStatus("Connected, Failed init", "text-amber-300");
@@ -827,30 +844,121 @@ function onDisconnected() {
 
   updateControlsForConnection(false);
   setStatus("Disconnected", "text-red-300");
+  releaseWakeLock();
 }
 
-function onLogRxData(frame) {
+// --- RX log handling ---
+function blinkRxLog() {
+  rxLogStatusEl.classList.remove("bg-zinc-500");
+  rxLogStatusEl.classList.add("bg-emerald-400");
+
+  requestAnimationFrame(() => {
+    setTimeout(() => {
+      rxLogStatusEl.classList.add("bg-zinc-500");
+      rxLogStatusEl.classList.remove("bg-emerald-400");
+    }, 150);
+  });
+}
+
+function pushRxHistory(key) {
+  // Add and keep the most recent 10. This goal is to prevent the
+  // client from spamming a single tile, but also allow it to
+  // eventually submit new samples after moving or refreshing.
+  state.rxHistory.push(key);
+  state.rxHistory = state.rxHistory.slice(-10);
+}
+
+async function trySendRxSample(repeater, lastSnr, lastRssi) {
+  try {
+    await ensureCurrentPositionIsFresh();
+  } catch (e) {
+    console.error("RxSample: Get location failed", e);
+    return;
+  }
+
+  // Get the current position and see if a
+  // new sample is needed for this tile.
+  const pos = state.currentPos;
+  const [lat, lon] = pos;
+  if (!isValidLocation(pos)) {
+    log("RxSample: Outside coverage area");
+    return;
+  }
+
+  // Track history per (tile hash, repeater id).
+  // It's interesting to know all of the repeaters that can be heard in a tile.
+  const hash = geohash6(lat, lon);
+  const historyKey = `${hash}#${repeater}`;
+
+  // Does this tile need a sample?
+  if (state.rxHistory.includes(historyKey))
+    return;
+
+  // Send sample to service.
+  try {
+    const data = {
+      hash: hash,
+      info: {
+        time: Date.now(),
+        rssi: lastRssi,
+        snr: lastSnr,
+        repeater: repeater
+      }
+    };
+    const dataStr = JSON.stringify(data);
+
+    // TODO: add timeout, this is "best effort" and shouldn't block.
+    log(`RxSample: sending ${dataStr}`);
+    await fetch("/put-rx-sample", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: dataStr,
+    });
+
+    pushRxHistory(historyKey);
+    addPingHistory({ hash: geohash8(lat, lon), rxLog: true });
+  } catch (e) {
+    console.error("RxSample: Service POST failed", e);
+  }
+}
+
+async function onLogRxData(frame) {
   const lastSnr = frame.lastSnr;
   const lastRssi = frame.lastRssi;
   let hitMobileRepeater = false;
   const packet = Packet.fromBytes(frame.raw);
 
-  // Only care about flood messages to the wardrive channel.
+  // Only care about flood group messages for RX samples.
   if (!packet.isRouteFlood()
     || packet.getPayloadType() != Packet.PAYLOAD_TYPE_GRP_TXT
     || packet.path.length == 0)
     return;
 
-  // First repeater (ignoring mobile repeater).
-  let firstRepeater = toHex(packet.path[0]);
-  if (firstRepeater === state.ignoredId) {
-    firstRepeater = toHex(packet.path[1]);
+  // Try to get the last hop, ignoring mobile repeaters.
+  let lastRepeater = getPathEntry(packet.path, -1);
+  if (lastRepeater === state.ignoredId) {
     hitMobileRepeater = true;
+    lastRepeater = getPathEntry(packet.path, -2);
   }
 
-  // No valid path.
-  if (firstRepeater === undefined)
+  // Is there a valid path?
+  if (!lastRepeater)
     return;
+
+  // If the mobile repeater wasn't hit and the RSSI is still too high,
+  // that usually means there's another repeater *very* close by. Ignore
+  // these packet so "heard" doesn't get polluted.
+  if (!hitMobileRepeater && !isValidRssi(lastRssi))
+    return;
+
+  // The RX data is not interesting if someone is using a mobile repeater
+  // because the last hop signal is always going to look really good.
+  // NB: It's expected to have invalid RSSI when hitMobileRepeater is true.
+  const shouldSendRxStats = !hitMobileRepeater;
+  if (shouldSendRxStats) {
+    blinkRxLog();
+    await trySendRxSample(lastRepeater, lastSnr, lastRssi);
+  }
 
   const reader = new BufferReader(packet.payload);
   const groupHash = reader.readByte();
@@ -874,11 +982,11 @@ function onLogRxData(frame) {
     const msgText = utf8decoder.decode(msgReader.readRemainingBytes()).replace(/\0/g, '');
     repeatEmitter.dispatchEvent(new CustomEvent("repeat", {
       detail: {
-        repeater: firstRepeater,
+        repeater: lastRepeater,
         text: msgText,
-        hitMobileRepeater: hitMobileRepeater,
-        lastSnr: lastSnr,
-        lastRssi: lastRssi
+        shouldSendRxStats,
+        lastSnr,
+        lastRssi
       }
     }));
   } catch (e) {
@@ -888,10 +996,10 @@ function onLogRxData(frame) {
 
 // --- Event bindings ---
 connectBtn.addEventListener("click", () => {
-  if (!state.connection)
-    handleConnect().catch(console.error);
-  else
+  if (state.connection)
     handleDisconnect().catch(console.error);
+  else
+    handleConnect().catch(console.error);
 });
 
 sendPingBtn.addEventListener("click", () => {
@@ -922,7 +1030,7 @@ document.addEventListener('visibilitychange', async () => {
   } else {
     await startLocationTracking();
 
-    if (state.running)
+    if (state.connection)
       await acquireWakeLock();
   }
 });
@@ -932,7 +1040,7 @@ if ('bluetooth' in navigator) {
   navigator.bluetooth.addEventListener('backgroundstatechanged',
     (e) => {
       const isBackground = e.target.value;
-      if (isBackground == true && state.running) {
+      if (isBackground == true && state.connection) {
         stopAutoPing();
         setStatus('Lost focus, Stopped', 'text-amber-300');
       }
