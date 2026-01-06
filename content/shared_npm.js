@@ -6,11 +6,7 @@ export { aes, geo };  // export APIs.
 
 // --- Exported Constants ---
 // The center position to use for point filtering.
-<<<<<<< HEAD
-export const centerPos = [27.77, -82.3899];
-=======
-export const centerPos = [47.6205, -122.3494];
->>>>>>> upstream/main
+export const centerPos = [27.77, -82.39];
 export const maxDistanceMiles = 150;
 export const dayInMillis = 24 * 60 * 60 * 1000;
 
@@ -197,8 +193,4 @@ export function getPathEntry(path, index) {
     return undefined;
 
   return toHex(path[realIndex]);
-<<<<<<< HEAD
 }
-=======
-}
->>>>>>> upstream/main
