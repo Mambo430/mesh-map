@@ -5,7 +5,7 @@
   "mqtt_password": "<PASSWORD>",
   "mqtt_topic": "meshcore/TPA/+/packets",
 
-  "service_host": "https://mesh-map-89j.pages.dev",
+  "service_host": "https://mesh-map.jntconnections.com",
   "center_position": [27.77, -82.39],
   "valid_dist": 150,
 
