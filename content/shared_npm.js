@@ -4,6 +4,18 @@ import { colord } from 'colord';
 
 export { aes, geo };  // export APIs.
 
+// --- Exported Constants ---
+// The center position to use for point filtering.
+export const centerPos = [27.77, -82.3899];
+export const maxDistanceMiles = 150;
+export const dayInMillis = 24 * 60 * 60 * 1000;
+
+// About 1 minute accuracy.
+const TIME_TRUNCATION = 100000;
+
+ // Normal RSSI is around -60.
+const MAX_VALID_RSSI = -31;
+
 // Generates 8 char geohash for the given lat/lon.
 export function geohash8(lat, lon) {
   return geo.encode(lat, lon, 8);
@@ -18,6 +30,10 @@ export function geohash6(lat, lon) {
 export function posFromHash(geohash) {
   const { latitude: lat, longitude: lon } = geo.decode(geohash);
   return [lat, lon];
+}
+
+export function isValidRssi(rssi) {
+  return rssi == null || rssi <= MAX_VALID_RSSI; 
 }
 
 // Haversine distance between two [lat, lon] points, in miles.
@@ -38,10 +54,6 @@ export function haversineMiles(a, b) {
   return 2 * R * Math.asin(Math.sqrt(h));
 }
 
-// The center position to use for point filtering.
-export const centerPos = [27.7700, -82.3899];
-export const maxDistanceMiles = 100;
-
 export function isValidLocation(p) {
   const [lat, lon] = p;
   if (lat < -90 || lat > 90 || lon < -180 || lon > 180) {
@@ -51,12 +63,19 @@ export function isValidLocation(p) {
   return haversineMiles(centerPos, p) < maxDistanceMiles;
 }
 
+export function assertValidGeohash(h) {
+  const [lat, lon] = posFromHash(h);
+  if (!isValidLocation([lat, lon])) {
+    throw new Error(`Hash ${h} (${[lat, lon]}) exceeds max distance`);
+  }
+}
+
 function roundToFourPlaces(n) {
   // Really, Javascript?
   return Math.round(n * 10000) / 10000;
 }
 
-export function parseLocation(latStr, lonStr) {
+export function parseLocation(latStr, lonStr, validate = true) {
   let lat = parseFloat(latStr);
   let lon = parseFloat(lonStr);
 
@@ -67,14 +86,12 @@ export function parseLocation(latStr, lonStr) {
   lat = roundToFourPlaces(lat);
   lon = roundToFourPlaces(lon);
 
-  if (!isValidLocation([lat, lon])) {
+  if (validate && !isValidLocation([lat, lon])) {
     throw new Error(`${[lat, lon]} exceeds max distance`);
   }
 
   return [lat, lon];
 }
-
-export const dayInMillis = 24 * 60 * 60 * 1000; 
 
 export function ageInDays(time) {
   return (Date.now() - new Date(time)) / dayInMillis;
@@ -101,9 +118,6 @@ export function sigmoid(value, scale = 0.25, center = 0) {
   const g = scale * (value - center)
   return 1 / (1 + Math.exp(-g));
 }
-
-// About 1 minute accuracy.
-const TIME_TRUNCATION = 100000;
 
 export function truncateTime(time) {
   return Math.round(time / TIME_TRUNCATION);
@@ -171,4 +185,12 @@ export function toHex(num) {
   if (numStr.length % 2)
     numStr = numStr.padStart(numStr.length + 1, "0");
   return numStr;
+}
+
+export function getPathEntry(path, index) {
+  const realIndex = (index >= 0) ? index : path.length + index;
+  if (path.length === 0 || realIndex < 0 ||  realIndex >= path.length)
+    return undefined;
+
+  return toHex(path[realIndex]);
 }
