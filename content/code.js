@@ -3,17 +3,17 @@ import {
   centerPos,
   clamp,
   definedOr,
+  fromTruncatedTime,
   geo,
   haversineMiles,
   lerp,
   maxDistanceMiles,
   posFromHash,
   pushMap,
-  sigmoid,
-  fromTruncatedTime,
+  sigmoid
 } from './shared.js'
 
-// Global Init
+// --- Global Init ---
 const map = L.map('map', {
   worldCopyJump: true,
   zoomControl: false,
@@ -37,6 +37,8 @@ let idToRepeaters = null; // Index of id -> [repeater]
 let hashToCoverage = null; // Index of geohash -> coverage
 let edgeList = null; // List of connected repeater and coverage
 let topRepeaters = null; // List of [repeater, count] with most hits
+let rxData = null; // RxLog coverage
+let hitRepeaters = new Set(); // Set of repeaters hit by tiles
 
 // Map layers
 const coverageLayer = L.layerGroup().addTo(map);
@@ -44,7 +46,8 @@ const edgeLayer = L.layerGroup().addTo(map);
 const sampleLayer = L.layerGroup().addTo(map);
 const repeaterLayer = L.layerGroup().addTo(map);
 
-// Map controls
+// --- Map controls ---
+// Main Controls
 const mapControl = L.control({ position: 'topleft' });
 mapControl.onAdd = m => {
   const div = L.DomUtil.create('div', 'mesh-control leaflet-control');
@@ -69,6 +72,9 @@ mapControl.onAdd = m => {
             <option value="pastDay" title="Tiles updated in the past 1 day">Past Day</option>
             <option value="repeaterCount" title="Higher indicates more repeaters">Repeater Count</option>
             <option value="sampleCount" title="Higher indicates more samples">Sample Count</option>
+            <option value="rxLogRssi" title="RSSI normalized as percentage, RxLog data">RxLog RSSI</option>
+            <option value="rxLogSnr" title="SNR normalized as percentage, RxLog data">RxLog SNR</option>
+            <option value="rxLogRptrCnt" title="Higher indicates more repeaters, RxLog data">RxLog Repeater Count</option>
           </select>
         </label>
       </div>
@@ -91,7 +97,7 @@ mapControl.onAdd = m => {
       <div class="mesh-control-row">
         <label>
           Show Samples:
-          <input type="checkbox" id="show-samples" disabled />
+          <input type="checkbox" id="show-samples" />
         </label>
       </div>
       <div class="mesh-control-row">
@@ -126,9 +132,9 @@ mapControl.onAdd = m => {
     });
 
   div.querySelector("#coverage-colormode-select")
-    .addEventListener("change", (e) => {
+    .addEventListener("change", async (e) => {
       coloringMode = e.target.value;
-      renderNodes(nodes);
+      await redrawMap();
     });
 
   div.querySelector("#repeater-filter-select")
@@ -150,10 +156,13 @@ mapControl.onAdd = m => {
     });
 
   div.querySelector("#refresh-map-button")
-    .addEventListener("click", () => refreshCoverage());
+    .addEventListener("click", () => {
+      rxData = null; // Will get refreshed next access.
+      refreshCoverage();
+    });
 
   div.querySelector("#use-colorscale")
-    .addEventListener("change", (e) => {
+    .addEventListener("change", async (e) => {
       const colorScaleEl = document.getElementById("color-scale");
       useColorScale = e.target.checked;
 
@@ -164,7 +173,7 @@ mapControl.onAdd = m => {
         colorScaleEl.classList.add("hidden");
         colorScaleEl.classList.remove("mesh-control-row");
       }
-      renderNodes(nodes);
+      await redrawMap();
     });
 
 
@@ -190,7 +199,7 @@ repeaterStatsControl.onAdd = m => {
 
   div.innerHTML = `
     <div id="topRepeatersSection" class="mesh-control-row mesh-control-title interactive">Top Repeaters</div>
-    <div id="topRepeatersList" class="mesh-control-row hidden"></div>
+    <div id="topRepeatersList" class="mesh-control-row hidden max-height-20"></div>
   `;
 
   div.querySelector("#topRepeatersSection")
@@ -247,8 +256,9 @@ senderStatsControl.onAdd = m => {
       const data = await resp.json();
       if (topList && data) {
         topList.innerHTML = '';
+        let rank = 1;
         data.forEach(d => {
-          topList.innerHTML += `<div class="top-row"><div>${escapeHtml(d.name)}</div><div>${d.tiles}</div></div>`;
+          topList.innerHTML += `<div class="top-row"><div>${rank++}</div><div>${escapeHtml(d.name)}</div><div>${d.tiles}</div></div>`;
         });
       }
     }
@@ -266,6 +276,7 @@ L.circle(centerPos, {
   fill: false
 }).addTo(map);
 
+// --- UX Helpers ---
 function escapeHtml(s) {
   return String(s)
     .replaceAll('&', '&amp;')
@@ -328,7 +339,7 @@ function getCoverageStyle(coverage) {
       } else {
         style.color = combined > 0 ? obsColor : missColor;
         style.opacity = 0.3;
-        style.fillOpacity = clamp(combined, 0.1, 0.9);
+        style.fillOpacity = clamp(Math.abs(combined), 0.1, 0.9);
       }
       break;
     }
@@ -336,11 +347,16 @@ function getCoverageStyle(coverage) {
     case 'observedPct': {
       const sampleCount = coverage.obs + coverage.lost;
       const observedPercent = coverage.obs / sampleCount;
-      if (useColorScale) {
-        style.color = getColorForValue(observedPercent);
+      if (observedPercent > 0) {
+        if (useColorScale) {
+          style.color = getColorForValue(observedPercent);
+        } else {
+          style.opacity = 0.5;
+          style.fillOpacity = clamp(observedPercent, 0.1, 0.9);
+        }
       } else {
-        style.opacity = 0.5;
-        style.fillOpacity = clamp(observedPercent, 0.1, 0.9);
+        style.opacity = 0.1;
+        style.fillOpacity = 0.1;
       }
       break;
     }
@@ -348,11 +364,16 @@ function getCoverageStyle(coverage) {
     case 'heardPct': {
       const sampleCount = coverage.hrd + coverage.lost;
       const heardPercent = coverage.hrd / sampleCount;
-      if (useColorScale) {
-        style.color = getColorForValue(heardPercent);
+      if (heardPercent > 0) {
+        if (useColorScale) {
+          style.color = getColorForValue(heardPercent);
+        } else {
+          style.opacity = 0.5;
+          style.fillOpacity = clamp(heardPercent, 0.1, 0.9);
+        }
       } else {
-        style.opacity = 0.5;
-        style.fillOpacity = clamp(heardPercent, 0.1, 0.9);
+        style.opacity = 0.1;
+        style.fillOpacity = 0.1;
       }
       break;
     }
@@ -372,13 +393,14 @@ function getCoverageStyle(coverage) {
       break;
     }
 
+    case 'rxLogSnr':
     case 'bySnr': {
       if (coverage.snr != null) {
         if (useColorScale) {
-          style.color = getColorForValue(lerp(coverage.snr, -12, 12));
+          style.color = getColorForValue(lerp(coverage.snr, -8, 8));
           style.fillOpacity = 0.85;
         } else {
-          const snr = coverage.snr / 12; // Normalize to about [-1, 1]
+          const snr = coverage.snr / 8; // Normalize to about [-1, 1]
           style.color = snr > 0 ? obsColor : missColor;
           style.fillOpacity = Math.min(0.9, Math.abs(snr));
         }
@@ -389,10 +411,11 @@ function getCoverageStyle(coverage) {
       break;
     }
 
+    case 'rxLogRssi':
     case 'byRssi': {
       if (coverage.rssi != null) {
         if (useColorScale) {
-          style.color = getColorForValue(lerp(coverage.rssi, -100, -40));
+          style.color = getColorForValue(lerp(coverage.rssi, -120, -40));
           style.fillOpacity = 0.85;
         } else {
           // Normalize to about [-1, 1], centered on -80
@@ -444,6 +467,7 @@ function getCoverageStyle(coverage) {
       break;
     }
 
+    case 'rxLogRptrCnt':
     case 'repeaterCount': {
       const repeaterCount = coverage.rptr?.length;
       if (repeaterCount) {
@@ -470,10 +494,41 @@ function getCoverageStyle(coverage) {
         style.fillOpacity = Math.min(0.9, sigmoid(sampleCount, 0.5, 3));
       }
     }
+
     default: break;
   }
 
   return style;
+}
+
+// --- Marker Builders ---
+function rxCoverageMarker(c) {
+  const [minLat, minLon, maxLat, maxLon] = geo.decode_bbox(c.hash);
+  const updated = new Date(c.time);
+  const style = getCoverageStyle(c);
+  const rect = L.rectangle([[minLat, minLon], [maxLat, maxLon]], style);
+  const details = `
+    <div><b>${c.hash}</b>
+    <span class="text-xs">${maxLat.toFixed(4)},${maxLon.toFixed(4)}</span></div>
+    <div>Samples: ${c.count}</div>
+    <div>SNR: ${c.snr.toFixed(2)} · RSSI: ${c.rssi.toFixed(2)}</div>
+    ${c.rptr.length > 0 ? `<div>Repeaters: ${c.rptr.join(', ')}</div>` : ''}
+    <div class="text-xs">
+    ${c.hrd ? `<div>Updated: ${shortDateStr(updated)}</div>` : ''}
+    </div>`;
+
+  rect.coverage = c;
+  rect.bindPopup(details, { maxWidth: 320 });
+  rect.on('popupopen', e => updateAllEdgeVisibility(e.target.coverage, false));
+  rect.on('popupclose', () => updateAllEdgeVisibility());
+
+  if (window.matchMedia("(hover: hover)").matches) {
+    rect.on('mouseover', e => updateAllEdgeVisibility(e.target.coverage, false));
+    rect.on('mouseout', () => updateAllEdgeVisibility());
+  }
+
+  c.marker = rect;
+  return rect;
 }
 
 function coverageMarker(c) {
@@ -489,10 +544,10 @@ function coverageMarker(c) {
     <div><b>${c.id} · (${(100 * obsRatio).toFixed(0)}%)</b>
     <span class="text-xs">${maxLat.toFixed(4)},${maxLon.toFixed(4)}</span></div>
     <div>Observed: ${c.obs} · Heard: ${c.hrd} · Lost: ${c.lost}</div>
-    ${c.snr ? `<div>SNR: ${c.snr ?? '✕'} · RSSI: ${c.rssi ?? '✕'}</div>` : ''}
+    ${c.snr || c.rssi ? `<div>SNR: ${c.snr ?? '✕'} · RSSI: ${c.rssi ?? '✕'}</div>` : ''}
     ${c.rptr.length > 0 ? `<div>Repeaters: ${c.rptr.join(', ')}</div>` : ''}
     <div class="text-xs">
-    <div>Updated: ${shortDateStr(updateDate)}</div>
+    ${c.ut ? `<div>Updated: ${shortDateStr(updateDate)}</div>` : ''}
     ${c.hrd ? `<div>Heard: ${shortDateStr(lastHeardDate)}</div>` : ''}
     ${c.obs ? `<div>Observed: ${shortDateStr(lastObservedDate)}</div>` : ''}
     </div>`;
@@ -576,6 +631,7 @@ function repeaterMarker(r) {
   return marker;
 }
 
+// --- Repeater Helpers ---
 function getBestRepeater(fromPos, repeaterList) {
   if (repeaterList.length === 1) {
     return repeaterList[0];
@@ -602,13 +658,14 @@ function shouldShowRepeater(r) {
   if (repeaterSearch !== '') {
     return r.id.toLowerCase().startsWith(repeaterSearch);
   } else if (repeaterRenderMode === "hit") {
-    return r.hitBy.length > 0;
+    return hitRepeaters.has(r);
   } else if (repeaterRenderMode === 'none') {
     return false;
   }
   return true;
 }
 
+// --- Visibility ---
 function updateSampleMarkerVisibility(s) {
   const el = s.getElement();
   if (showSamples) {
@@ -683,6 +740,82 @@ function updateAllEdgeVisibility(end, dimTiles = false) {
   coverageToHighlight.forEach(m => updateCoverageMarkerHighlight(m, { highlight: true }));
 }
 
+// --- Render Map ---
+async function redrawMap() {
+  hitRepeaters.clear()
+
+  switch (coloringMode) {
+    case "rxLogRssi":
+    case "rxLogSnr":
+    case "rxLogRptrCnt":
+      await renderPassive();
+      break;
+
+    default:
+      renderNodes(nodes);
+      break;
+  }
+}
+
+async function renderPassive() {
+  map.closePopup(); // Ensure pop-up handlers don't fire while updating.
+  coverageLayer.clearLayers();
+  edgeLayer.clearLayers();
+  sampleLayer.clearLayers();
+  repeaterLayer.clearLayers();
+
+  if (rxData === null) {
+    try {
+      const resp = await fetch("/get-rx-samples");
+      rxData = (await resp.json()) ?? [];
+      rxData.forEach(c => {
+        c.pos = posFromHash(c.hash);
+        c.rptr = c.repeaters;
+        delete c.repeaters;
+      });
+      console.log(`Got ${rxData.length} rx-samples from service.`);
+    } catch (e) {
+      console.error("Getting rx-samples failed", e);
+    }
+  }
+
+  const rxEdgeList = [];
+
+  // Add coverage boxes.
+  rxData.forEach(c => {
+    coverageLayer.addLayer(rxCoverageMarker(c));
+
+    c.rptr.forEach(r => {
+      const candidateRepeaters = idToRepeaters.get(r);
+      if (candidateRepeaters === undefined)
+        return;
+
+      const bestRepeater = getBestRepeater(c.pos, candidateRepeaters);
+      rxEdgeList.push({ repeater: bestRepeater, coverage: c });
+    });
+  });
+
+  // Add repeaters.
+  nodes.repeaters.forEach(r => {
+    repeaterLayer.addLayer(repeaterMarker(r));
+  });
+
+  // Add edges.
+  // TODO: Render on the fly instead to keep object count down?
+  rxEdgeList.forEach(e => {
+    const style = {
+      weight: 2,
+      opacity: 0,
+      dashArray: '2,4',
+      interactive: false,
+    };
+    const line = L.polyline([e.repeater.pos, e.coverage.pos], style);
+    line.ends = [e.repeater, e.coverage];
+    line.addTo(edgeLayer);
+    hitRepeaters.add(e.repeater);
+  });
+}
+
 function renderNodes(nodes) {
   map.closePopup(); // Ensure pop-up handlers don't fire while updating.
   coverageLayer.clearLayers();
@@ -701,8 +834,7 @@ function renderNodes(nodes) {
   });
 
   // Add repeaters.
-  const repeatersToAdd = [...idToRepeaters.values()].flat();
-  repeatersToAdd.forEach(r => {
+  nodes.repeaters.forEach(r => {
     repeaterLayer.addLayer(repeaterMarker(r));
   });
 
@@ -718,6 +850,7 @@ function renderNodes(nodes) {
     const line = L.polyline([e.repeater.pos, e.coverage.pos], style);
     line.ends = [e.repeater, e.coverage];
     line.addTo(edgeLayer);
+    hitRepeaters.add(e.repeater);
   });
 }
 
@@ -725,12 +858,14 @@ function renderTopRepeaters() {
   const topList = document.getElementById('topRepeatersList');
   if (topList && topRepeaters) {
     topList.innerHTML = '';
+    let rank = 1;
     topRepeaters.forEach(([id, count]) => {
-      topList.innerHTML += `<div class="top-row"><div>${escapeHtml(id)}</div><div>${count}</div></div>`;
+      topList.innerHTML += `<div class="top-row"><div>${rank++}</div><div>${escapeHtml(id)}</div><div>${count}</div></div>`;
     });
   }
 }
 
+// --- Load and Init
 function buildIndexes(nodes) {
   hashToCoverage = new Map();
   idToRepeaters = new Map();
@@ -785,7 +920,6 @@ function buildIndexes(nodes) {
 
   // Index repeaters.
   nodes.repeaters.forEach(r => {
-    r.hitBy = [];
     r.pos = posFromHash(r.hash);
     [r.lat, r.lon] = r.pos;
     pushMap(idToRepeaters, r.id, r);
@@ -799,15 +933,14 @@ function buildIndexes(nodes) {
         return;
 
       const bestRepeater = getBestRepeater(coverage.pos, candidateRepeaters);
-      bestRepeater.hitBy.push(coverage);
       edgeList.push({ repeater: bestRepeater, coverage: coverage });
     });
   });
 
-  // Build top repeaters list (top 15).
+  // Build top repeaters list (top 50).
   const repeaterGroups = Object.groupBy(edgeList, e => `[${e.repeater.id}] ${e.repeater.name}`);
   const sortedGroups = Object.entries(repeaterGroups).toSorted(([, a], [, b]) => b.length - a.length);
-  topRepeaters = sortedGroups.slice(0, 15).map(([id, tiles]) => [id, tiles.length]);
+  topRepeaters = sortedGroups.slice(0, 50).map(([id, tiles]) => [id, tiles.length]);
 }
 
 export async function refreshCoverage() {
@@ -819,6 +952,6 @@ export async function refreshCoverage() {
 
   nodes = await resp.json();
   buildIndexes(nodes);
-  renderNodes(nodes);
+  await redrawMap();
   renderTopRepeaters();
 }
