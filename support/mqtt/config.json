@@ -3,16 +3,18 @@
   "mqtt_port": 443,
   "mqtt_username": "<USERNAME>",
   "mqtt_password": "<PASSWORD>",
-  "mqtt_topic": "meshcore/TPA/+/packets",
+  "mqtt_topic": "meshcore/+/+/packets",
 
-  "service_host": "https://mesh-map.jntconnections.com",
-  "center_position": [27.77, -82.39],
-  "valid_dist": 150,
+  "service_host": "https://mesh-map-89j.pages.dev",
+  "center_position": [28.00, -81.55],
+  "valid_dist": 220,
 
   "channel_hash": "e0",
   "channel_secret": "4076c315c1ef385fa93f066027320fe5",
 
   "watched_observers": [
-    "TF-Room"
+    "TF-Room",
+    "N2AWS - MeshMapper",
+    "TownEstates"
   ]
 }
