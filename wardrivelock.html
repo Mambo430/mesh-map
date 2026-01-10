@@ -1,19 +1,30 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Wardrive</title>
+  <meta charset="utf-8" />
+  <title>MeshCore Wardrive</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="MeshCore Wardrive - Crowd-sourced mesh coverage tool">
+  <meta name="keywords" content="MeshCore,coverage,wardrive,cascadia,pugetmesh">
+  <meta name="author" content="Kyle Reed">
+  <link rel="manifest" href="content/wardrive.json">
+  <link rel="icon" href="content/wardrive.png">
+  <link rel="stylesheet" href="content/tailwind.css">
 
-  <!-- Leaflet CSS (fixed integrity) -->
+  <!-- Leaflet -->
   <link rel="stylesheet"
         href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
         integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY"
         crossorigin="">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+          integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo"
+          crossorigin=""></script>
 
   <style>
-    .leaflet-interactive.marker-shadow { filter: url(#marker-shadow); }
+    .leaflet-interactive.marker-shadow {
+      filter: url(#marker-shadow);
+    }
   </style>
 </head>
 
@@ -21,7 +32,7 @@
   <main class="min-h-screen flex items-start justify-center p-4">
     <div class="w-full max-w-3xl space-y-4">
 
-      <!-- Header -->
+      <!-- Header ----------------------------------------------------------- -->
       <header class="flex items-center justify-between">
         <h1 class="flex items-center gap-2 text-xl font-semibold">
           <img class="h-8 w-8" src="content/wardrive.png" alt="Wardrive logo">
@@ -35,14 +46,15 @@
         </div>
       </header>
 
-      <!-- Button group -->
-      <section>
+      <!-- Button row ------------------------------------------------------- -->
+      <section class="mt-2">
         <div class="flex items-center gap-2">
           <button id="connectBtn"
                   class="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-sm font-medium disabled:opacity-40">
             Connect
           </button>
 
+          <!-- New “Keep screen on” toggle ---------------------------------- -->
           <button id="wakeBtn"
                   class="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-sm font-medium"
                   aria-label="Toggle keep‑screen‑on">
@@ -62,13 +74,13 @@
         </div>
       </section>
 
-      <!-- Map -->
-      <div id="map" class="rounded-lg h-[350px] shadow-sm"></div>
+      <!-- The Map --------------------------------------------------------- -->
+      <div id="map" class="rounded-lg h-140 shadow-sm"></div>
 
-      <!-- Bottom controls -->
+      <!-- Bottom controls ------------------------------------------------- -->
       <section class="bg-slate-800/80 border border-slate-700 rounded-lg p-2 space-y-2 shadow-sm">
         <!-- Send radio name consent -->
-        <div class="space-y-1 text-xs text-slate-300 mb-4">
+        <div class="space-y-1 text-xs align-middle text-slate-300 mb-4">
           <label class="flex gap-2">
             <input type="checkbox" id="sendRadioNameCB">
             Send my radio name with pings (for leaderboard).
@@ -91,11 +103,11 @@
         </div>
       </section>
 
-      <!-- Info -->
+      <!-- Info ------------------------------------------------------------ -->
       <section>
         <div class="text-xs italic text-slate-400">
-          Sends location to <span class="font-mono">#wardrive</span> to build the <a class="underline"
-            href="/" target="_blank">coverage map</a>.
+          Sends location to <span class="font-mono">#wardrive</span> to build the
+          <a class="underline" target="_blank" href="/">coverage map</a>.
         </div>
         <div class="text-xs italic text-slate-400">
           Requires Bluetooth &amp; Location permissions.
@@ -104,98 +116,105 @@
           Must remain in foreground with screen on and unlocked.
         </div>
         <div class="text-xs italic text-slate-400">
-          Requires <a class="underline" href="https://apps.apple.com/us/app/bluefy-web-ble-browser/id1492822055"
-            target="_blank">Bluefy</a> on iOS.
-          <a class="underline" href="https://play.google.com/store/apps/details?id=com.microsoft.emmx"
-            target="_blank">Edge</a>
-          or <a class="underline" href="https://play.google.com/store/apps/details?id=com.android.chrome"
-            target="_blank">Chrome</a> on Android.
+          Requires
+          <a class="underline" href="https://apps.apple.com/us/app/bluefy-web-ble-browser/id1492822055" target="_blank">Bluefy</a>
+          on iOS, Edge or Chrome on Android.
         </div>
         <div class="text-xs italic text-slate-400">
-          <span>Only for Central West Florida (CWF) region.</span> <span>See <a class="underline"
-            href="/howto" target="_blank">howto</a> for more info.</span>
+          Only for Central West Florida (CWF) region. See <a class="underline" href="/howto" target="_blank">howto</a> for more info.
         </div>
       </section>
 
     </div>
   </main>
 
-  <!-- 1️⃣ Import wardrive logic (module) -->
-  <script type="module" src="content/wardrive.js"></script>
+  <!-- ------------------------------------------------------------------- -->
+  <!-- Import Wardrive logic (module) ------------------------------------- -->
   <script type="module">
     import { onLoad } from './content/wardrive.js';
     onLoad();
   </script>
 
-  <!-- 2️⃣ Wake‑Lock helper (plain script) -->
+  <!-- ------------------------------------------------------------------- -->
+  <!-- Wake‑Lock helper – plain JavaScript (no module) ------------------- -->
   <script>
-    let wakeLockSentinel = null; // holds the WakeLockSentinel
+    /* ------------------------------------------------------------------
+     * Simple Wake‑Lock helper
+     * ------------------------------------------------------------------ */
+    const wakeBtn   = document.getElementById('wakeBtn');
+    let wakeLock    = null;          // holds the WakeLockSentinel (if available)
+    let keepAliveId = null;          // fallback keep‑alive timer
 
     async function acquireWakeLock() {
-      if (!('wakeLock' in navigator)) {
-        console.warn('Wake Lock API not supported.');
+      if (!('wakeLock' in navigator)) {          // not supported
+        console.warn('Wake Lock API not available – using keep‑alive fallback');
+        startKeepAlive();
         return;
       }
       try {
-        wakeLockSentinel = await navigator.wakeLock.request('screen');
-        console.log('✅ Screen Wake Lock acquired');
-        wakeLockSentinel.addEventListener('release', () => {
-          console.log('⚠️ Wake Lock released');
+        wakeLock = await navigator.wakeLock.request('screen');
+        console.log('✅ Wake‑Lock acquired');
+        // re‑acquire automatically if the lock is released
+        wakeLock.addEventListener('release', () => {
+          console.log('⚠️ Wake‑Lock released');
           if (document.visibilityState === 'visible') acquireWakeLock();
         });
       } catch (err) {
-        console.error(`🚨 Wake Lock request failed: ${err.name} – ${err.message}`);
+        console.error('🚨 Wake‑Lock request failed:', err);
       }
     }
 
-    // Fallback for browsers without Wake‑Lock
-    let keepAliveTimer = null;
-    function startKeepAlive() {
-      keepAliveTimer = setInterval(() => { void document.title; }, 25_000);
+    function releaseWakeLock() {
+      if (wakeLock) {
+        wakeLock.release();
+        wakeLock = null;
+        console.log('❌ Wake‑Lock released');
+      }
+    }
+
+    /* ------------------------------------------------------------------
+     * Keep‑alive fallback (tiny interval that keeps the page active)
+     * ------------------------------------------------------------------ */
+    function startKeepAlive() {               // ~15‑sec interval keeps the page from sleeping
+      if (keepAliveId) return;
+      keepAliveId = setInterval(() => { void document.title; }, 15_000);
     }
     function stopKeepAlive() {
-      if (keepAliveTimer) clearInterval(keepAliveTimer);
-      keepAliveTimer = null;
+      clearInterval(keepAliveId);
+      keepAliveId = null;
     }
 
-    function initWakeLock() {
-      if ('wakeLock' in navigator) acquireWakeLock();
-      else startKeepAlive();
+    /* ------------------------------------------------------------------
+     * Button toggle – called when the user clicks “Keep screen on”
+     * ------------------------------------------------------------------ */
+    let keepScreenOn = false;
+    function toggleWakeLock() {
+      keepScreenOn = !keepScreenOn;
+      wakeBtn.textContent = keepScreenOn ? 'Stop Keeping Screen On' : 'Keep Screen On';
+
+      if (keepScreenOn) {
+        acquireWakeLock();   // will automatically fall back if not supported
+        startKeepAlive();    // extra safety on older browsers
+      } else {
+        releaseWakeLock();
+        stopKeepAlive();
+      }
     }
 
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible') {
-        if ('wakeLock' in navigator) acquireWakeLock();
-        else startKeepAlive();
-      } else {
-        if (wakeLockSentinel) wakeLockSentinel.release();
-        stopKeepAlive();
-      }
-    });
+    /* ------------------------------------------------------------------
+     * Wire the button
+     * ------------------------------------------------------------------ */
+    const wakeBtn = document.createElement('button');
+    wakeBtn.id   = 'wakeBtn';
+    wakeBtn.className = 'px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-sm font-medium';
+    wakeBtn.textContent = 'Keep Screen On';
+    wakeBtn.setAttribute('aria-label', 'Toggle keep‑screen‑on');
 
-    if (document.readyState === 'complete' || document.readyState === 'interactive')
-      initWakeLock();
-    else
-      document.addEventListener('DOMContentLoaded', initWakeLock);
-  </script>
+    /* Insert the button just after the “Connect” button in the UI */
+    const connectBtn = document.getElementById('connectBtn');
+    connectBtn.parentNode.insertBefore(wakeBtn, connectBtn.nextSibling);
 
-  <!-- 3️⃣ Wake‑Lock toggle button -->
-  <script>
-    const wakeBtn = document.getElementById('wakeBtn');
-    let keepAwake = false;
-
-    wakeBtn.addEventListener('click', async () => {
-      keepAwake = !keepAwake;
-      wakeBtn.textContent = keepAwake ? 'Turn off keep‑awake' : 'Keep screen on';
-
-      if (keepAwake) {
-        if ('wakeLock' in navigator) acquireWakeLock();
-        else startKeepAlive();
-      } else {
-        if (wakeLockSentinel) await wakeLockSentinel.release();
-        stopKeepAlive();
-      }
-    });
+    wakeBtn.addEventListener('click', toggleWakeLock);
   </script>
 
   <!-- iOS Safari SVG shadow hack -->
@@ -207,4 +226,5 @@
     </defs>
   </svg>
 </body>
+
 </html>
