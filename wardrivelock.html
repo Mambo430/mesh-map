@@ -32,7 +32,7 @@
   <main class="min-h-screen flex items-start justify-center p-4">
     <div class="w-full max-w-3xl space-y-4">
 
-      <!-- Header ----------------------------------------------------------- -->
+      <!-- Header ------------------------------------------------------------ -->
       <header class="flex items-center justify-between">
         <h1 class="flex items-center gap-2 text-xl font-semibold">
           <img class="h-8 w-8" src="content/wardrive.png" alt="Wardrive logo">
@@ -46,7 +46,7 @@
         </div>
       </header>
 
-      <!-- Button row ------------------------------------------------------- -->
+      <!-- Button row -------------------------------------------------------- -->
       <section class="mt-2">
         <div class="flex items-center gap-2">
           <button id="connectBtn"
@@ -54,11 +54,11 @@
             Connect
           </button>
 
-          <!-- New “Keep screen on” toggle ---------------------------------- -->
+          <!-- <strong>Keep‑screen‑lock button – added in markup</strong> -->
           <button id="wakeBtn"
                   class="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-sm font-medium"
                   aria-label="Toggle keep‑screen‑on">
-            Keep screen on
+            Screen Lock OFF
           </button>
 
           <div id="pingButtons" class="ml-auto flex items-center gap-2">
@@ -74,10 +74,10 @@
         </div>
       </section>
 
-      <!-- The Map --------------------------------------------------------- -->
+      <!-- The Map ----------------------------------------------------------- -->
       <div id="map" class="rounded-lg h-140 shadow-sm"></div>
 
-      <!-- Bottom controls ------------------------------------------------- -->
+      <!-- Bottom controls ----------------------------------------------------- -->
       <section class="bg-slate-800/80 border border-slate-700 rounded-lg p-2 space-y-2 shadow-sm">
         <!-- Send radio name consent -->
         <div class="space-y-1 text-xs align-middle text-slate-300 mb-4">
@@ -103,7 +103,7 @@
         </div>
       </section>
 
-      <!-- Info ------------------------------------------------------------ -->
+      <!-- Info -------------------------------------------------------------- -->
       <section>
         <div class="text-xs italic text-slate-400">
           Sends location to <span class="font-mono">#wardrive</span> to build the
@@ -128,35 +128,33 @@
     </div>
   </main>
 
-  <!-- ------------------------------------------------------------------- -->
-  <!-- Import Wardrive logic (module) ------------------------------------- -->
+  <!-- Import Wardrive logic (module) ---------------------------------------- -->
   <script type="module">
     import { onLoad } from './content/wardrive.js';
     onLoad();
   </script>
 
-  <!-- ------------------------------------------------------------------- -->
-  <!-- Wake‑Lock helper – plain JavaScript (no module) ------------------- -->
+  <!-- Wake‑Lock helper – plain JavaScript --------------------------------- -->
   <script>
-    /* ------------------------------------------------------------------
-     * Simple Wake‑Lock helper
-     * ------------------------------------------------------------------ */
-    const wakeBtn   = document.getElementById('wakeBtn');
-    let wakeLock    = null;          // holds the WakeLockSentinel (if available)
+    /* -------------------- Wake‑Lock helper -------------------- */
+    const wakeBtn = document.getElementById('wakeBtn');
+
+    let wakeLock    = null;          // holds the WakeLockSentinel (if supported)
     let keepAliveId = null;          // fallback keep‑alive timer
 
+    /* Acquire the screen Wake‑Lock (or fall back) */
     async function acquireWakeLock() {
-      if (!('wakeLock' in navigator)) {          // not supported
-        console.warn('Wake Lock API not available – using keep‑alive fallback');
+      if (!('wakeLock' in navigator)) {
+        console.warn('Wake‑Lock API not supported – using keep‑alive fallback');
         startKeepAlive();
         return;
       }
       try {
         wakeLock = await navigator.wakeLock.request('screen');
-        console.log('✅ Wake‑Lock acquired');
-        // re‑acquire automatically if the lock is released
+        console.log('✅ Wake‑Lock acquired – screen will stay on');
         wakeLock.addEventListener('release', () => {
-          console.log('⚠️ Wake‑Lock released');
+          console.warn('⚠️ Wake‑Lock released automatically');
+          // If the page is visible, re‑acquire
           if (document.visibilityState === 'visible') acquireWakeLock();
         });
       } catch (err) {
@@ -164,57 +162,44 @@
       }
     }
 
+    /* Release the Wake‑Lock (if any) */
     function releaseWakeLock() {
       if (wakeLock) {
         wakeLock.release();
         wakeLock = null;
-        console.log('❌ Wake‑Lock released');
+        console.log('❌ Wake‑Lock released – screen may sleep now');
       }
     }
 
-    /* ------------------------------------------------------------------
-     * Keep‑alive fallback (tiny interval that keeps the page active)
-     * ------------------------------------------------------------------ */
-    function startKeepAlive() {               // ~15‑sec interval keeps the page from sleeping
+    /* Keep‑alive fallback – tiny interval that keeps the page active */
+    function startKeepAlive() {
       if (keepAliveId) return;
-      keepAliveId = setInterval(() => { void document.title; }, 15_000);
+      keepAliveId = setInterval(() => { void document.title; }, 15_000); // 15 s
+      console.log('⏱️ Keep‑alive interval started (fallback)');
     }
     function stopKeepAlive() {
-      clearInterval(keepAliveId);
+      if (keepAliveId) clearInterval(keepAliveId);
       keepAliveId = null;
+      console.log('⏱️ Keep‑alive interval stopped');
     }
 
-    /* ------------------------------------------------------------------
-     * Button toggle – called when the user clicks “Keep screen on”
-     * ------------------------------------------------------------------ */
-    let keepScreenOn = false;
-    function toggleWakeLock() {
-      keepScreenOn = !keepScreenOn;
-      wakeBtn.textContent = keepScreenOn ? 'Stop Keeping Screen On' : 'Keep Screen On';
+    /* Toggle button handler ------------------------------------ */
+    let isLocked = false;
+    function toggleScreenLock() {
+      isLocked = !isLocked;
+      wakeBtn.textContent = isLocked ? 'Screen Lock ON' : 'Screen Lock OFF';
 
-      if (keepScreenOn) {
-        acquireWakeLock();   // will automatically fall back if not supported
-        startKeepAlive();    // extra safety on older browsers
+      if (isLocked) {
+        acquireWakeLock();   // will use fallback if not supported
+        startKeepAlive();    // safety on older browsers
       } else {
         releaseWakeLock();
         stopKeepAlive();
       }
     }
 
-    /* ------------------------------------------------------------------
-     * Wire the button
-     * ------------------------------------------------------------------ */
-    const wakeBtn = document.createElement('button');
-    wakeBtn.id   = 'wakeBtn';
-    wakeBtn.className = 'px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-sm font-medium';
-    wakeBtn.textContent = 'Keep Screen On';
-    wakeBtn.setAttribute('aria-label', 'Toggle keep‑screen‑on');
-
-    /* Insert the button just after the “Connect” button in the UI */
-    const connectBtn = document.getElementById('connectBtn');
-    connectBtn.parentNode.insertBefore(wakeBtn, connectBtn.nextSibling);
-
-    wakeBtn.addEventListener('click', toggleWakeLock);
+    /* Wire the button click */
+    wakeBtn.addEventListener('click', toggleScreenLock);
   </script>
 
   <!-- iOS Safari SVG shadow hack -->
@@ -226,5 +211,4 @@
     </defs>
   </svg>
 </body>
-
 </html>
